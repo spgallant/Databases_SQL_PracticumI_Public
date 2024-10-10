@@ -1,0 +1,766 @@
+---
+title: "Practicum I CS5200"
+author: "Sarah Gallant"
+date: "Summer Full 2023"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+Pre-work: clear workspace
+```{r clear_workspace}
+rm(list = ls()) #clear workspace
+```
+
+
+## Connect to Database
+Prompt item #3, connecting to a MySQL database hosted by myfreesqlhosting.net
+```{r connect_to_DB, eval = T, warning = F}
+# 1. Library
+library(RMySQL)
+
+# 2. Settings freemysqlhosting.net (max 5MB)
+db_name_fh <- "sqlREDACTED"
+db_user_fh <- "sqlREDACTED"
+db_host_fh <- "sql9.freemysqlhosting.net"
+db_pwd_fh <- "REDACTED"
+db_port_fh <- 3306
+
+# 3. Connect to remote server database
+mydb.fh <-  dbConnect(RMySQL::MySQL(), user = db_user_fh, password = db_pwd_fh,
+                      dbname = db_name_fh, host = db_host_fh, port = db_port_fh)
+
+mydb <- mydb.fh
+```
+
+
+## Create Database
+Prompt item #4, construction of the database tables, with constraints and election of primary and foreign keys.
+
+### Create strikes table (#4E)
+Option to drop the strikes table if it already exists
+```{sql drop_strikes_table, connection=mydb}
+DROP TABLE IF EXISTS strikes
+```
+
+Creation of the strikes table with specifications and constraints as below. The num_birds attribute has been modified from "numBirds" in the prompt to allow for cleaner reading by the DBMS. This table definition assumes the heavy boolean attribute may be represented as 0 for false and 1 for true given that that is common syntax for a TRUE/FALSE flag variable. The altitude constraint representing this attribute as a positive integer assumes that 0 is a positive integer and thus data with an altitude of 0 or above should be included. The sid is represented as an auto-incrementing primary key to meet the requirements from the prompt for a synthetic primary key; this representation is supported by the notes for the flights table regarding fid and further detail below in the data load section.
+```{sql create_strikes_table, connection=mydb}
+CREATE TABLE strikes (
+  sid INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  fid INTEGER,
+  num_birds INTEGER,
+  impact TEXT,
+  damage BOOLEAN,
+  altitude INTEGER ,
+  conditions INTEGER,
+  CHECK (altitude>=0)
+);
+```
+
+### Create flights table (#4A)
+Option to drop the flights table if it already exists
+```{sql drop_flights_table, connection=mydb}
+DROP TABLE IF EXISTS flights
+```
+
+Creation of the flights table with specifications and constraints as below. This table definition assumes the heavy boolean attribute may be represented as 0 for false and 1 for true given that that is common syntax for a TRUE/FALSE flag variable. The altitude constraint representing this attribute as a positive integer assumes that 0 is a positive integer and thus data with an altitude of 0 or above should be included. Further, the fid has been constructed as non-auto incrementing based on the inability of the sample data to provide definition between flights and thus the use of the rid field of the sample data for fid (see below under the data load section for more detail).
+```{sql create_flights_table, connection=mydb}
+CREATE TABLE flights (
+  fid INTEGER NOT NULL PRIMARY KEY,
+  date DATE,
+  origin INTEGER,
+  airline TEXT,
+  aircraft TEXT,
+  heavy BOOLEAN, 
+  altitude INTEGER,
+  CHECK (altitude>=0)
+);
+```
+
+
+### Create airports table (#4B)
+Option to drop the airports table if it already exists
+```{sql drop_airports_table, connection=mydb}
+DROP TABLE IF EXISTS airports
+```
+
+Creation of the airports table with specifications and constraints as below. This table definition utilizes an auto-incremented primary key as the required synthetic key. 
+```{sql create_airports_table, connection=mydb}
+CREATE TABLE airports (
+  aid INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  airportstate TEXT,
+  airportcode TEXT
+);
+```
+
+
+### Link the flights and airports tables (#4C)
+Link the airports and flights tables with a foreign key connection from origin in the flights table to aid in the airports table
+```{sql link_flights_and_airports, connection=mydb}
+ALTER TABLE flights
+  ADD FOREIGN KEY (origin)
+  REFERENCES airports(aid);
+```
+
+
+### Create conditions table (#4D)
+Option to drop the conditions table if it already exists
+```{sql drop_conditions_table, connection=mydb}
+DROP TABLE IF EXISTS conditions
+```
+
+Creation of the conditions table with specifications and constraints as below. This table definition utilizes an auto-incremented primary key as the required synthetic key. 
+```{sql create_conditions_table, connection=mydb}
+CREATE TABLE conditions (
+  cid INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  sky_condition TEXT,
+  explanation TEXT
+);
+```
+
+Link the strikes and conditions tables with a foreign key connection from conditions in the strikes table to cid in the conditions table
+```{sql link_strikes_and_conditions, connection=mydb}
+ALTER TABLE strikes
+  ADD FOREIGN KEY (conditions)
+  REFERENCES conditions(cid);
+```
+
+### Link the strikes and flights tables (#4F)
+Link the strikes and flights tables with a foreign key connection from fid in the strikes table to fid in the flights table
+```{sql link_strikes_and_flights, connection=mydb}
+ALTER TABLE strikes
+  ADD FOREIGN KEY (fid)
+  REFERENCES flights(fid);
+```
+
+### Non-eval testing of table definitions (#4G)
+Test the tables with addition of data - airports
+```{sql test_data_load_airports, connection=mydb, eval = FALSE}
+INSERT INTO airports (airportstate, airportcode) VALUES 
+  ("Georgia", "ATL"),
+  ("Tennessee", "NAT"),
+  ("New York", "LAG");
+  
+```
+
+Test the tables with display of test data - airports
+```{sql test_data_display_airports, connection=mydb,eval = FALSE}
+SELECT * FROM airports
+```
+
+Test the tables with addition of data - no airportcode - airports
+```{sql test_data_load_airports2, connection=mydb, eval = FALSE}
+INSERT INTO airports (airportstate) VALUES 
+  ("Mississippi"),
+  ("South Dakota");
+```
+
+Test the tables with display of test data - no airportcode - airports
+```{sql test_data_display_airports2, connection=mydb,eval = FALSE}
+SELECT * FROM airports
+```
+
+Test the tables with addition of data - flights
+```{sql test_data_load_flights, connection=mydb, eval = FALSE}
+INSERT INTO flights (fid,date, origin, airline, aircraft, heavy, altitude) VALUES 
+  (2085,'2023-06-15', 1, 'BUSINESS', 'Aircraft', TRUE, 10000),
+  (2086,'2023-06-16', 2, 'AMERICAN AIRLINES', 'Aircraft', FALSE, 8000),
+  (2087,'2023-06-17', 3, 'UNITED AIRLINES', 'Aircraft', TRUE, 12000);
+  
+```
+
+Test the tables with addition of data - flights (failed altitude constraint). Note: an error for this failed constraint will only display with MySQL version 8*+.
+```{sql test_flights_constraint_altitude, connection=mydb, eval = FALSE}
+INSERT INTO flights (fid,date, origin, airline, aircraft, heavy, altitude) VALUES 
+  (2088,'2023-06-17', 3, 'UNITED AIRLINES', 'Aircraft', TRUE, -500);
+  
+```
+
+Test the tables with addition of data - flights (failed FK constraint -> expect error).
+```{sql test_flights_fk_origin, connection=mydb, eval = FALSE}
+INSERT INTO flights (fid,date, origin, airline, aircraft, heavy, altitude) VALUES 
+  (2089,'2023-06-17', 15, 'UNITED AIRLINES', 'Aircraft', TRUE, 500);
+  
+```
+
+Test the tables with addition of data - flights (failed PK constraint -> expect error).
+```{sql test_flights_pk, connection=mydb, eval = FALSE}
+INSERT INTO flights (date, origin, airline, aircraft, heavy, altitude) VALUES 
+  ('2023-06-17', 15, 'UNITED AIRLINES', 'Aircraft', TRUE, 500);
+  
+```
+
+Test the tables with display of test data - flights
+```{sql test_data_display_flights, connection=mydb,eval = FALSE}
+SELECT * FROM flights
+```
+
+Test the tables with addition of data - conditions
+```{sql test_data_load_conditions, connection=mydb, eval = FALSE}
+INSERT INTO conditions (sky_condition, explanation) VALUES 
+  ('No Cloud', "No DMG REPTD"),
+  ('Some Cloud', "HIT FLAP"),
+  ('Overcast', "FLT 580 ORD-MBS");
+  
+```
+
+Test the tables with display of test data - conditions
+```{sql test_data_display_conditions, connection=mydb,eval = FALSE}
+SELECT * FROM conditions
+```
+
+Test the tables with addition of data - strikes
+```{sql test_data_load_strikes, connection=mydb, eval = FALSE}
+INSERT INTO strikes (fid, num_birds, impact, damage, altitude, conditions) VALUES 
+  (2085, 5, 'Engine Shut Down', TRUE, 10000, 1),
+  (2086, 2, 'Aborted Take-off', TRUE, 8000, 2),
+  (2087, 1, 'None', FALSE, 12000, 3);
+  
+```
+
+Test the tables with addition of data - strikes (failed altitude constraint). Note: an error for this failed constraint will only display with MySQL version 8*+.
+```{sql test_strikes_constraint_altitude, connection=mydb, eval = FALSE}
+INSERT INTO strikes (fid, num_birds, impact, damage, altitude, conditions) VALUES 
+  (2088, 1, 'None', FALSE, -1, 3);
+  
+```
+
+Test the tables with addition of data - strikes (failed fid FK constraint -> expect error).
+```{sql test_strikes_fk_fid, connection=mydb, eval = FALSE}
+INSERT INTO strikes (fid, num_birds, impact, damage, altitude, conditions) VALUES 
+  (3000, 1, 'None', FALSE, 0, 3);
+  
+```
+
+Test the tables with addition of data - strikes (failed conditions FK constraint -> expect error).
+```{sql test_strikes_fk_conditions, connection=mydb, eval = FALSE}
+INSERT INTO strikes (fid, num_birds, impact, damage, altitude, conditions) VALUES 
+  (2087, 1, 'None', FALSE, 0,15);
+  
+```
+
+Test the tables with display of test data - strikes
+```{sql test_data_display_strikes, connection=mydb,eval = FALSE}
+SELECT * FROM strikes
+```
+
+Clear test data from table - strikes
+```{sql clear_test_data_strikes, connection=mydb, eval = FALSE}
+DELETE FROM strikes;
+```
+
+Clear test data from table - flights
+```{sql clear_test_data_flights, connection=mydb, eval = FALSE}
+DELETE FROM flights;
+```
+
+Clear test data from table - conditions
+```{sql clear_test_data_conditions, connection=mydb, eval = FALSE}
+DELETE FROM conditions;
+```
+
+Clear test data from table - airports
+```{sql clear_test_data_airports, connection=mydb, eval = FALSE}
+DELETE FROM airports;
+```
+
+Display deletion of data from table - strikes
+```{sql display_deletion_strikes, connection=mydb, eval = FALSE}
+SELECT * FROM strikes;
+```
+
+Display deletion of data from table - flights
+```{sql display_deletion_flights, connection=mydb, eval = FALSE}
+SELECT * FROM flights;
+```
+
+Display deletion of data from table - conditions
+```{sql display_deletion_conditions, connection=mydb, eval = FALSE}
+SELECT * FROM conditions;
+```
+
+Display deletion of data from table - airports
+```{sql display_deletion_airports, connection=mydb, eval = FALSE}
+SELECT * FROM airports;
+```
+
+
+## Load the Bird Strike data (#5)
+Remove dataframe bds.raw if it exists (supressed warning if non-existent at this time)
+```{r drop_df, warning = F}
+rm(bds.raw)
+```
+
+The code below loads data from the designated csv file into a data frame
+```{r load_csv_data_in_df}
+bds.raw <- read.csv("BirdStrikesData-V2.csv")
+```
+
+
+## Use the dataframe to populate the tables (#6)
+This section captures the loading of the data from the bds.raw data frame into the appropriate tables, including any necessary conversions of the data.
+
+The flights table utilizes an fid primary key loaded from the rid column of the bds.raw data frame (bird strikes data). The strikes table utilizes an auto-incremented sid primary key. The justification for this representation stems from the inability to clearly determine the uniqueness of a given flight, even with a combination of data columns. For example, rids #200529 and #204001 appear to be the same flight (with multiple strikes), but subtle comments in the remarks indicate that they are actually different flights (note: the remarks do not consistently include this information). Thus, if flights that appeared the same were captured as one, and all strikes tied to that flight after the first strike are excluded (as is stated in the prompt), the result would be a large loss of data based on an assumption. This would directly affect the results of queries and related analysis performed on this data (none of which currently looks at strikes per flight). Additionally, the prompt only allows for the fid in the flights table (versus the primary key in any other table) to be non-synthetic. With this in mind, while the database allows for a one-flight to many-strikes relationship, the presented data does not directly support that at this time, and thus the decisions regarding sid and fid were made with the goal to keep the greatest integrity of the data.
+
+
+### Load data from df into table - conditions
+The segment below loads data from the sky_conditions column of the data frame bds.raw into the sky_condition column of the conditions lookup table in our database. As this is a lookup table, the data is cut down to unique values for sky conditions. The sql load statement is then put together with the appropriate syntax and values and the statement is executed to load the data. The explanation column for this table is left blank (added for future expansion) per the prompt and the cid column is auto-loaded upon insertion of new data through its designation as an auto-incremented primary key.
+```{r load_table_data_conditions}
+
+# pull sky_conditions data from df as unique list
+conditions_data <- unique(bds.raw$sky_conditions)
+
+
+# define [partial] sql stmnt for loading into table
+sql_load_stmnt <- "INSERT INTO conditions (sky_condition) VALUES "
+
+# correct syntax for VALUES part of sql statemnt for loading into table
+value_rows <- paste0("('", conditions_data, "')")
+values <- paste(value_rows, collapse = ", ")
+
+# combine partial sql stmnt and values section for full load statement
+full_sql_load_stmnt <- paste0(sql_load_stmnt, values)
+
+
+# initiate load of data using full sql stmnt
+result <- dbSendStatement(mydb, full_sql_load_stmnt)
+
+
+```
+
+
+### Load data from df into table - airports
+The segment below loads data from the origin column of the data frame bds.raw into the airportstate column of the airports lookup table in our database. As this is a lookup table, the data is cut down to unique values for airport state. The sql load statement is then put together with the appropriate syntax and values and the statement is executed to load the data. The airportcode column for this table is left blank (added for future expansion) per the prompt and the aid column is auto-loaded upon insertion of new data through its designation as an auto-incremented primary key.
+```{r load_table_data_airports}
+
+# pull origin data from df as unique list
+airport_data <- unique(bds.raw$origin)
+
+
+# define [partial] sql stmnt for loading into table
+sql_load_stmnt <- "INSERT INTO airports (airportstate) VALUES "
+
+# correct syntax for VALUES part of sql statemnt for loading into table
+value_rows <- paste0("('", airport_data, "')")
+values <- paste(value_rows, collapse = ", ")
+
+# combine partial sql stmnt and values section for full load statement
+full_sql_load_stmnt <- paste0(sql_load_stmnt, values)
+
+
+# initiate load of data using full sql stmnt
+result <- dbSendStatement(mydb, full_sql_load_stmnt)
+
+
+```
+
+
+### Load data from df into table - flights
+The segment below takes an input of a column and converts it to an integer, removing any commas. 
+```{r convert_column_to_int}
+convert_integer <- function(column) {
+  as.integer(gsub(",","",column))
+}
+```
+
+The segment below converts the altitude column to integers using the convert_integer function.
+```{r convert_altitude_to_int}
+
+bds.raw$altitude_ft <- convert_integer(bds.raw$altitude_ft)
+
+```
+
+The segment below updates the data for the attribute altitude to meet the table constraint of positive integer values (0 and above) by changing any blank altitude entries in the data frame to have a value of 999999. This value meets the constraint, but is an unreasonable real-world altitude value and thus will allow these data rows to be identified as a separate group for exclusion or querying. This update is made to the data frame itself as altitude data is loaded in more than one table. 
+```{r change_altitude_blanks}
+bds.raw$altitude_ft[is.na(bds.raw$altitude_ft)] <- 999999
+```
+
+The segment below converts any blanks in the airline column to 0, reflecting "False", as a default. This assumption observes that the majority of the known data reflects a heavy_flag of no/0/false and follows the thinking that heavy aircraft are larger aircraft and are thus more likely to be required to report this data fully as part of reporting and safety standards of their employer/ the FAA. If ultimately this data is found unreliable, these data rows can be excluded using the 999999 altitude value.
+```{r convert_heavy_blanks_to_0}
+bds.raw$heavy_flag[bds.raw$heavy_flag == ""] <- 0
+```
+
+The segment below converts any "No" for the heavy_flag data to FALSE/0 and any "Yes" to TRUE/1.
+```{r convert_heavy_values_to_TF}
+bds.raw$heavy_flag[bds.raw$heavy_flag == "No"] <- 0
+bds.raw$heavy_flag[bds.raw$heavy_flag == "Yes"] <- 1
+```
+
+The segment below converts any blanks for the airline column of the data frame to "unknown".
+```{r convert_airline_blanks}
+bds.raw$airline[bds.raw$airline == ""] <- "UNKNOWN"
+
+```
+
+The segment below converts the data in the flight_date column of the data frame to date-time format. Blanks are converted to NA, the column is converted to dates, then the NA values are reset to an unrealistic maximum.
+```{r convert_flight_date_type}
+# Convert flight_date to date format, keeping blanks as NA
+bds.raw$flight_date <- ifelse(bds.raw$flight_date == "", NA, bds.raw$flight_date)
+bds.raw$flight_date <- as.Date(bds.raw$flight_date, format = "%m/%d/%Y %H:%M")
+
+# Replace NA values with the dummy date "9999-12-31"
+bds.raw$flight_date[is.na(bds.raw$flight_date)] <- as.Date("9999-12-31")
+```
+
+The segment below converts the data in the origin column of the data frame from the string value for a state to its corresponding aid from the airports table by creating a data frame of airport data and then merging that with the bds.raw data frame on the origin column, then removing the original origin column and renaming the new aid column that was brought in.
+```{r convert_origin_aid_merge}
+# Retrieve data from the airports table
+airport_data <- dbGetQuery(mydb, "SELECT aid, airportstate FROM airports")
+
+# Merge the data frames with a join matching the origin column with the airportstate
+bds.raw <- merge(bds.raw, airport_data, 
+                 by.x = "origin", by.y = "airportstate", all.x = TRUE)
+
+# Drop the original origin column
+bds.raw <- bds.raw[, !(names(bds.raw) %in% c("origin"))]
+
+# Rename the aid column to become origin column
+colnames(bds.raw)[colnames(bds.raw) == "aid"] <- "origin"
+```
+
+The segment below loads the data from the data frame into the flights table. Regarding mappings for this data: fid is described above in the header for #6, while date, origin, airline, heavy, and altitude have similar labels between the data source and the table or are explained in the prompt. The aircraft column in the table has been tied to the model column of the bds.raw/bird strike data given that the information contained in the model column is more informative than the alternative column (aircraft) in the bds.raw/bird strike data. Specifically, the aircraft column in the source data only includes "airplane" or blanks for values, while the model column includes a variety of data values and would be more helpful for users of the database.
+```{r load_flights_table}
+# Create a data frame with the columns to be loaded
+flights_data <- data.frame(
+  fid = bds.raw$rid,
+  date = bds.raw$flight_date,
+  origin = bds.raw$origin,
+  airline = bds.raw$airline,
+  aircraft = bds.raw$model,
+  heavy = bds.raw$heavy_flag, 
+  altitude = bds.raw$altitude_ft
+)
+
+# Load the data frame to the flights table
+dbWriteTable(mydb, "flights", flights_data, row.names = FALSE, append = TRUE)
+```
+
+
+### Load data from df into table - strikes
+
+The segment below converts the data in the sky_conditions column of the data frame from the string value for a condition to its corresponding cid from the conditions table by creating a data frame of conditions data and then merging that with the bds.raw data frame on the sky_conditions column, then removing the original sky_conditions column and renaming the new cid column that was brought in.
+```{r convert_sky_condition_cid_merge}
+# Retrieve data from the conditions table
+conditions_data <- dbGetQuery(mydb, "SELECT cid, sky_condition FROM conditions")
+
+# Rename the column in bds.raw to match the column name in conditions_data
+colnames(bds.raw)[colnames(bds.raw) == "sky_conditions"] <- "sky_condition"
+
+# Merge the data frames with a join matching on the sky_condition to pull in the cid
+bds.raw <- merge(bds.raw, conditions_data, 
+                 by.x = "sky_condition", by.y = "sky_condition", all.x = TRUE)
+
+# Update the sky_conditions column with the corresponding cid
+bds.raw$sky_conditions <- bds.raw$cid
+
+# Remove the superfluous cid and sky_condition columns
+bds.raw <- bds.raw[, !(names(bds.raw) %in% c("cid", "sky_condition"))]
+
+```
+
+The segment below converts any blanks for the airline column of the data frame to "unknown".
+```{r convert_impact_blanks}
+bds.raw$impact[bds.raw$impact == ""] <- "UNKNOWN"
+
+```
+
+The segment below loads the data from the bds.raw data frame into the strikes table.  Regarding mappings for this data: sid and fid are described above in the header for #6, while num_birds, impact, damage, altitude, and conditions have similar labels and data types between the data source and the table or are explained in the prompt. 
+```{r load_strikes_table}
+
+# Create a data frame with the columns to be loaded
+strikes_data <- data.frame(
+  fid = bds.raw$rid,
+  num_birds = bds.raw$wildlife_struck,
+  impact = bds.raw$impact,
+  damage = ifelse(bds.raw$damage == "Caused damage", 1,0),
+  altitude = as.integer(gsub(",", "", bds.raw$altitude_ft)),
+  conditions = bds.raw$sky_conditions
+)
+
+# Load the data frame to the strikes table
+dbWriteTable(mydb, "strikes", strikes_data, row.names = FALSE, append = TRUE)
+
+
+```
+
+
+## Display parts of tables to show data load (#7)
+### Conditions table
+The segment below displays several rows from the conditions table
+```{sql display_table_data_conditions, connection=mydb}
+SELECT * FROM conditions
+LIMIT 3;
+```
+
+
+### Airports table
+The segment below displays several rows from the airports table
+```{sql display_table_data_airports, connection=mydb}
+SELECT * FROM airports
+LIMIT 25;
+```
+
+
+### Flights table
+The segment below displays several rows from the flights table
+```{sql display_table_data_flights, connection=mydb}
+SELECT * FROM flights
+WHERE fid > 200000 AND fid < 200200; 
+```
+
+
+The segment below displays several rows from the flights table restricted based on date to exhibit accurate representation of the data format in the table
+```{sql check_flights_date_type, connection=mydb}
+select * FROM flights
+ WHERE date between '2001-01-01' and '2001-1-05'
+```
+
+
+### Strikes table
+The segment below displays several rows from the strikes table
+```{sql display_table_data_strikes, connection=mydb}
+SELECT * FROM strikes
+WHERE fid > 200000 AND fid < 200100; 
+```
+
+
+## SQL Queries of Database
+
+### Top 10 States with the greatest number of bird strikes (#8)
+Create a SQL query against your database to find the top 10 states with the greatest number of bird strike incidents.
+Display the state and the number of incidents. Note that every row in the strikes table constitutes one "incident".
+```{sql query_top_state_number_strikes, connection=mydb}
+SELECT a.airportstate as 'State', count(s.sid) as 'Incidents'
+FROM strikes s 
+  JOIN flights f ON (s.fid = f.fid)
+  JOIN airports a ON (f.origin = a.aid)
+GROUP BY State
+ORDER BY Incidents desc
+LIMIT 10
+```
+
+
+### Airlines with an above average number of bird strikes (#9)
+Create a SQL query against your database to find the airlines that had an above average number bird strike incidents. To do this, find the number of bird strike incidents for each airline (remember that each row in the strikes table is a single bird strike incident). Then calculate the average across all airlines and from there find those airlines which had an above average number of bird strike incidents. List the names of the airlines and the number of incidents for each.
+```{sql query_above_avg_strikes_by_airline, connection=mydb}
+SELECT incidentcount.Airline, incidentcount.Incidents
+FROM (
+  SELECT f.airline AS 'Airline', COUNT(s.sid) AS 'Incidents'
+  FROM flights f
+  JOIN strikes s ON (f.fid = s.fid)
+  GROUP BY Airline
+) AS incidentcount
+WHERE incidentcount.Incidents > (
+  SELECT AVG(Incidents)
+  FROM (
+    SELECT f.airline, COUNT(s.sid) AS 'Incidents'
+    FROM flights f
+    JOIN strikes s ON (f.fid = s.fid)
+    GROUP BY f.airline
+  ) AS average
+) ORDER BY Incidents desc;
+```
+
+
+### Total bird strikes by month as data frame (#10)
+Create a SQL query against your database to find the (total) number of birds that struck aircraft by month. Save the result of the query in a dataframe. Note that this query excludes data where the year is 9999 as those data rows are utilizing a filler date while the real date is unknown.
+```{r query_strikes_by_month, warning =F}
+# execute sql query with result in data frame
+result <- dbGetQuery(mydb, "SELECT MONTHNAME(f.date) as 'Month', 
+SUM(s.num_birds) as 'TotalBirdsStruck'
+  FROM strikes s JOIN flights f ON (f.fid = s.fid)
+  WHERE YEAR(f.date) <> 9999
+  GROUP BY Month
+  ORDER BY MONTH(f.date) asc")
+```
+
+The segment below displays the first 6 rows of the data frame, per the prompt.
+```{r display_strikes_by_month_df}
+head(result,6)
+```
+
+## Create a column chart (#11)
+Using the dataframe from Question 10 above, build a column chart that plots month along the x-axis versus number of birds on the y-axis. Adorn the graph with appropriate axis labels, titles, legend, data labels, etc.
+```{r create_scatterplot_strikes_by_month}
+
+# pull out each column of df as separate vector
+months <- result$Month
+birds_struck <- result$TotalBirdsStruck
+
+y_padding <- max(birds_struck) * 1.1
+xlim <- c(0.5, length(months)+0.5)
+
+# create the original column chart
+# data, type of data point rep., width of data points, color, title, x-axis label,
+#    y-axis label, no x-axis month labels, pad bars
+plot(birds_struck, type = "h", lwd = 10, col = "lightblue",
+     main="Total Bird Strikes by Month", xlab = "Month", ylab = "Number of Birds", 
+     xaxt ='n', ylim = c(0,y_padding), xlim = xlim) 
+
+# add legend
+# x-axis location, y-axis location, label, color, width of color point, scale of legend
+legend(1,11000, legend = "Total Birds Struck", col = "lightblue",
+       lwd = 10, cex = 0.8 )
+
+# Add x-axis labels
+# tick marks: side, location, no text labels
+axis(1, at = 1:length(months), labels = FALSE)
+# text labels: x-coord placement, y-coord placement, content labels, show labels, 
+#    label angle, label distance from tick marks
+text(x = 1:length(months), y = -2, labels = months, xpd = TRUE, srt = 45, adj = c(1, 2)) 
+
+# Add data labels above each column
+# x-coord for labels, y-coord in relation to bars, values for labels, 
+#    label placement around bar, scale of label
+text(x = 1:length(months), y = birds_struck + 5, labels = birds_struck,
+     pos = 3, cex = 0.8)
+
+# Adjust the plot margins to avoid clipping components of chart
+par(mar = c(5, 4, 4, 7) + 0.1)  # Increase the right margin
+
+
+
+
+```
+
+
+## Create a stored procedure in MySQL (#12)
+Create a stored procedure in MySQL that adds a new strike to the database. You may decide what you need to pass to the stored procedure to add a bird strike incident and you must account for there being potentially a new airport, flight, and/or conditions. After insertion, show (in R) that your procedure worked. 
+
+### Create the procedure
+Drop stored procedure to add a new strike
+```{sql drop_proc_new_strike, connection=mydb}
+DROP PROCEDURE if exists add_bird_strike;
+```
+
+Stored procedure for adding a new strike
+```{sql stored_proc_new_strike, connection=mydb}
+# opener for procedure creation with arguments for attributes from all tables in db, 
+#   in case needed
+CREATE PROCEDURE add_bird_strike(
+  IN p_airportstate TEXT,
+  IN p_airportcode TEXT,
+  IN p_sky_condition TEXT,
+  IN p_explanation TEXT,
+  IN p_fid INTEGER,
+  IN p_date DATE,
+  IN p_origin INTEGER,
+  IN p_airline TEXT,
+  IN p_aircraft TEXT,
+  IN p_heavy BOOLEAN,
+  IN p_altitude INTEGER,
+  IN p_num_birds INTEGER,
+  IN p_impact TEXT,
+  IN p_damage BOOLEAN,
+  IN p_conditions INTEGER
+)
+BEGIN
+
+  /* create variables to hold table ids from non-strikes tables so that they can be used
+  in more than one select statement */
+  DECLARE v_cid INTEGER;
+  DECLARE v_aid INTEGER;
+  DECLARE v_fid INTEGER;
+
+  /*check for presence of inputted sky condition*/
+  SELECT cid INTO v_cid FROM conditions WHERE cid = p_conditions;
+  
+  /*if needed, create new entry in conditions table*/
+  IF v_cid IS NULL THEN
+    INSERT INTO conditions (sky_condition, explanation)
+    VALUES (p_sky_condition,p_explanation);
+    SET v_cid = LAST_INSERT_ID();
+  END IF;
+  
+  /* check for presence of inputted fid FK */
+  SELECT fid INTO v_fid FROM flights WHERE fid = p_fid;
+  
+  /* if needed, add new flights table entry */
+  IF v_fid IS NULL THEN
+  
+    /* if fid not found, need new entry in flights table, so check for presence 
+    of origin */
+    SELECT aid INTO v_aid FROM airports WHERE aid = p_origin;
+  
+    /* if origin not found, add new entry in airports table */
+    IF v_aid IS NULL THEN
+      INSERT INTO airports (airportstate, airportcode)
+      VALUES (p_airportstate,p_airportcode);
+      SET v_aid = LAST_INSERT_ID();
+    END IF;
+  
+    /* add the flight data itself */
+    INSERT INTO flights (fid, date, origin, airline, aircraft, heavy, altitude)
+    VALUES (p_fid, p_date, v_aid, p_airline, p_aircraft, p_heavy, p_altitude);
+    SET v_fid = p_fid;
+  END IF;
+  
+  
+  /* add new strikes table entry */
+  INSERT INTO strikes (fid, num_birds, impact, damage, altitude, conditions)
+  VALUES (v_fid, p_num_birds, p_impact, p_damage, p_altitude, v_cid);
+END;
+  
+  
+```
+
+Test addition of a new bird strike using the add_bird_strike procedure - airport, conditions, and flight exist (Note: utilizes an fid already in use)
+```{sql test_proc_new_strike1, connection=mydb}
+CALL add_bird_strike("New York","1","overcast", "", 200142,'2001-03-01', 1,
+  "United Airlines", "BOEING 737", TRUE, 5000, 10, "minor", TRUE, 3);
+```
+
+Test addition of a new bird strike using the add_bird_strike procedure - airport, conditions, and flight do not exist
+```{sql test_proc_new_strike2, connection=mydb}
+CALL add_bird_strike("Oaxaca","","sunny", "", 20091,'2001-3-1', 500, 
+  "United Airlines", "BOEING 737", TRUE, 5000, 10, "minor", TRUE, 15);
+```
+
+### Show in R that your procedure worked
+Display of new strikes after using the add_bird_strike procedure
+```{r display_new_strike}
+# query the system and assign result 
+result <- dbGetQuery(mydb, "SELECT * FROM strikes
+  WHERE fid = 200142 OR fid = 20091;")
+
+#display result
+result
+```
+
+Display of new condition after using the add_bird_strike procedure
+```{r display_new_condition}
+# query the system and assign result 
+result <- dbGetQuery(mydb, "SELECT * FROM conditions
+  WHERE sky_condition = 'sunny';")
+
+#display result
+result
+```
+
+Display of new airport after using the add_bird_strike procedure
+```{r display_new_airport}
+# query the system and assign result 
+result <- dbGetQuery(mydb, "SELECT * FROM airports
+  WHERE airportstate = 'Oaxaca';")
+
+#display result
+result
+```
+
+Display of new flight after using the add_bird_strike procedure
+```{r display_new_flight}
+# query the system and assign result 
+result <- dbGetQuery(mydb, "SELECT * FROM flights
+  WHERE fid = 20091;")
+
+#display result
+result
+```
+
+## Disconnect from Database
+```{r disconnect_db, eval = T, warning = F}
+status <-dbDisconnect(mydb.fh)
+```
+
+
